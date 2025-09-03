@@ -77,11 +77,20 @@ function computeFrom(roster: ReturnType<typeof parseCSV>, facts: ReturnType<type
   let totalSessions7 = 0; let totalTime7 = 0; let totalDiagnostics = 0;
   const deltaByStudent7 = new Map<string, number>();
 
-  const byDistrict = new Map<string, any>();
+  type DistrictAgg = {
+    activeSchools: Set<string>;
+    activeStudents: Set<string>;
+    sessions: number;
+    time: number;
+    improved: number;
+    studentsImprovement: Map<string, number>;
+  };
 
-  function ensureDistrict(d: string) {
+  const byDistrict = new Map<string, DistrictAgg>();
+
+  function ensureDistrict(d: string): DistrictAgg {
     if (!byDistrict.has(d)) byDistrict.set(d, { activeSchools: new Set<string>(), activeStudents: new Set<string>(), sessions: 0, time: 0, improved: 0, studentsImprovement: new Map<string, number>() });
-    return byDistrict.get(d);
+    return byDistrict.get(d)!;
   }
 
   facts.rows.forEach((r) => {
@@ -126,7 +135,7 @@ function computeFrom(roster: ReturnType<typeof parseCSV>, facts: ReturnType<type
   });
 
   // District table rows
-  const districtRows = Array.from(byDistrict.entries()).map(([name, agg]) => {
+  const districtRows = Array.from(byDistrict.entries()).map(([name, agg]: [string, DistrictAgg]) => {
     const improvedCount = Array.from(agg.studentsImprovement.values()).filter((d: number) => d > 0).length;
     const activeStudentsCount = agg.activeStudents.size || 1; // avoid div by zero
     // Totals and active target breakdowns per district
