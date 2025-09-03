@@ -27,8 +27,10 @@ export function KpiRow() {
   const { state, dispatch } = useStore();
   const subjectsToShow = state.filters.subjects.length ? state.filters.subjects : state.options.subjects;
 
-  const subjectBarsByKpi = useMemo(() => {
-    if (!state.raw) return null as any;
+  const subjectBarsByKpi = useMemo<
+    Record<string, Array<{label:string;pct:number;color:string;value:number|string;t?:number;nt?:number}>> | null
+  >(() => {
+    if (!state.raw) return null;
     const R = state.raw;
     const rk = R.keys.roster, fk = R.keys.facts;
     const rosterById = new Map<string, any>();

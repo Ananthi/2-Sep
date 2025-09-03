@@ -1,5 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../state';
+// Local types to aid type inference in callbacks
+type CoverageSegs = { green: number; amber: number; grey: number; blue: number };
+type CoveragePerSubject = { subj: string; segs: CoverageSegs };
 
 export function Coverage() {
   const { state, dispatch } = useStore();
@@ -12,9 +15,12 @@ export function Coverage() {
   const subjectsToShow = state.filters.subjects.length ? state.filters.subjects : state.options.subjects;
 
   // Compute per-subject coverage when raw data is available; otherwise fall back to single aggregate bar
-  const perSubject = useMemo(() => {
+  const perSubject = useMemo<{
+    list: CoveragePerSubject[];
+    targetTotal: number;
+  } | null>(() => {
     const raw = state.raw;
-    if (!raw) return null as any;
+    if (!raw) return null;
     const R = raw;
     const rk = R.keys.roster, fk = R.keys.facts;
 
@@ -68,7 +74,7 @@ export function Coverage() {
     })();
 
     // Build per-subject bars
-    const results: Array<{ subj: string; segs: { green: number; amber: number; grey: number; blue: number } }> = [];
+    const results: CoveragePerSubject[] = [];
     const rosterById = new Map<string, any>();
     R.roster.forEach(r => { const id = r[rk.StudentID]; if (id) rosterById.set(id, r); });
 
@@ -168,7 +174,7 @@ export function Coverage() {
       {perSubject ? (
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: `repeat(${subjectsToShow.length}, minmax(0, 1fr))` }}>
           {subjectsToShow.map((subj) => {
-            const found = perSubject.list.find(p => p.subj === subj);
+            const found = perSubject!.list.find((p: CoveragePerSubject) => p.subj === subj);
             const segs = found?.segs || { green: 0, amber: 0, grey: 0, blue: 0 };
             const total = (segs.green || 0) + (segs.amber || 0) + (segs.grey || 0) + (segs.blue || 0);
             return (
@@ -379,7 +385,7 @@ function Donut({ size, thickness, total, segments, onSegmentClick, centerLabel, 
       })}
       {/* External data labels with leader lines (high-contrast text) - gated */}
       {showLabels && (() => {
-        if (t === 0) return null as any;
+        if (t === 0) return null;
         let accFrac = 0;
         return segments.map((s, idx) => {
           const frac = s.value / t;

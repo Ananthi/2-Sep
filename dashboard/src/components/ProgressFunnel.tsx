@@ -59,9 +59,11 @@ export function ProgressFunnel() {
   );
 }
 
-function useSubjectFunnels() {
+type SubjectFunnel = { subject: string; funnel: { stage: string; value: number; pct: number }[]; max: number };
+
+function useSubjectFunnels(): SubjectFunnel[] | null {
   const { state } = useStore();
-  const raw = state.raw; if (!raw) return null as any;
+  const raw = state.raw; if (!raw) return null;
   const R = raw; const rk = R.keys.roster, fk = R.keys.facts;
   const rosterById = new Map<string, any>(); R.roster.forEach(r => { const id = r[rk.StudentID]; if (id) rosterById.set(id, r); });
   function normSubj(s: string) { const t=(s||'').trim().toLowerCase(); if (t.startsWith('math')) return 'Math'; if (t.startsWith('eng')) return 'English'; if (t.startsWith('tel')) return 'Telugu'; return s || ''; }

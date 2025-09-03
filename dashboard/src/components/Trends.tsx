@@ -88,11 +88,11 @@ function MultiSparkline({ series }: { series: Array<{ label: string; color: stri
   );
 }
 
-function useSubjectBarsForTrends() {
+function useSubjectBarsForTrends(): Record<string, Array<{label:string;pct:number;color:string;value:number|string;t?:number;nt?:number}>> | null {
   const { state } = useStore();
   const raw = state.raw;
   return useMemo(() => {
-    if (!raw) return null as any;
+    if (!raw) return null;
     const R = raw; const rk = R.keys.roster, fk = R.keys.facts;
     const rosterById = new Map<string, any>(); R.roster.forEach(r=>{ const id=r[rk.StudentID]; if (id) rosterById.set(id,r); });
     const geo = { d: new Set(state.filters.districts), m: new Set(state.filters.mandals), s: new Set(state.filters.schools) };
@@ -173,9 +173,9 @@ function useSubjectBarsForTrends() {
   }, [state]);
 }
 
-function useSubjectSeriesForTrends() {
+function useSubjectSeriesForTrends(): Record<string, Array<{label:string;color:string;points:number[]}>> | null {
   const { state } = useStore();
-  const raw = state.raw; if (!raw) return null as any;
+  const raw = state.raw; if (!raw) return null;
   const R = raw; const rk = R.keys.roster, fk = R.keys.facts;
   const rosterById = new Map<string, any>(); R.roster.forEach(r=>{ const id=r[rk.StudentID]; if (id) rosterById.set(id,r); });
   const geo = { d: new Set(state.filters.districts), m: new Set(state.filters.mandals), s: new Set(state.filters.schools) };

@@ -82,11 +82,20 @@ function BarDistribution({ label, parts, total, showLabel = true, showValues = f
 
 function pctNum(a: number, b: number) { if (!b) return 0; return Math.round((a/b)*100); }
 
-function useMilestoneDistributions() {
+function useMilestoneDistributions(): {
+  subjects: string[];
+  levels: number[];
+  initial: Record<string, Part[]>;
+  current: Record<string, Part[]>;
+  totalsInitial: Record<string, number>;
+  totalsCurrent: Record<string, number>;
+  progressed: Record<string, number>;
+  studentTotals: Record<string, number>;
+} | null {
   const { state } = useStore();
   const raw = state.raw;
   return useMemo(() => {
-    if (!raw) return null as any;
+    if (!raw) return null;
     const R = raw;
     const rk = R.keys.roster, fk = R.keys.facts;
     const rosterById = new Map<string, any>();
