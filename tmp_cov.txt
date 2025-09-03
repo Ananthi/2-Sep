@@ -1,0 +1,295 @@
+import React, { useMemo } from 'react';
+import { useStore } from '../state';
+
+export function Coverage() {
+  const { state, dispatch } = useStore();
+  const scope = state.coverageScope;
+  const modePercent = state.coverageMode === 'Percent';
+
+  // Subjects to display: if filter has selections, show only those; otherwise show all available subjects
+  const subjectsToShow = state.filters.subjects.length ? state.filters.subjects : state.options.subjects;
+
+  // Compute per-subject coverage when raw data is available; otherwise fall back to single aggregate bar
+  const perSubject = useMemo(() => {
+    const raw = state.raw;
+    if (!raw) return null as any;
+    const R = raw;
+    const rk = R.keys.roster, fk = R.keys.facts;
+
+    // Geo/Class filters only (subject is show/hide, not aggregator)
+    const geo = { d: new Set(state.filters.districts), m: new Set(state.filters.mandals), s: new Set(state.filters.schools) };
+    const classSel = new Set(state.filters.classes);
+    function passRosterGeoClass(ro: any) {
+      if (!ro) return false;
+      if (classSel.size && !classSel.has(ro[rk.Grade])) return false;
+      if (geo.s.size) { if (!geo.s.has(ro[rk.SchoolName])) return false; }
+      else if (geo.m.size) { if (!geo.m.has(ro[rk.Mandal])) return false; }
+      else if (geo.d.size) { if (!geo.d.has(ro[rk.District])) return false; }
+      return true;
+    }
+
+    // Time window for Active
+    const dates = R.facts.map(f => f[fk.Date]).filter(Boolean).map(s => new Date(s + 'T00:00:00Z').getTime());
+    const maxTs = dates.length ? Math.max(...dates) : Date.now();
+    const maxDate = new Date(maxTs);
+    let from = new Date(maxDate), to = new Date(maxDate);
+    const quick = state.filters.quick;
+    if (quick === 'Yesterday') { from.setUTCDate(maxDate.getUTCDate() - 1); to = new Date(from); }
+    else if (quick === 'Last 30 Days') { from.setUTCDate(maxDate.getUTCDate() - 29); }
+    else { from.setUTCDate(maxDate.getUTCDate() - 6); }
+    if (state.filters.range.from) from = new Date(state.filters.range.from + 'T00:00:00Z');
+    if (state.filters.range.to) to = new Date(state.filters.range.to + 'T00:00:00Z');
+    function inWindow(dateStr: string) {
+      const t = new Date(dateStr + 'T00:00:00Z');
+      return t >= from && t <= to;
+    }
+
+    // Totals by entity for Target in scope (geo/class)
+    const totalTargetByScope = (() => {
+      const filtered = R.roster.filter(ro => passRosterGeoClass(ro) && ro[rk.TargetFlag] === '1');
+      if (scope === 'Students') return filtered.length;
+      if (scope === 'Schools') return new Set(filtered.map(ro => ro[rk.SchoolID])).size;
+      if (scope === 'Mandals') return new Set(filtered.map(ro => ro[rk.Mandal])).size;
+      return new Set(filtered.map(ro => ro[rk.District])).size;
+    })();
+
+    // Non-target totals by entity (active + inactive) within geo/class
+    const nonTargetTotalsByScope = (() => {
+      const filtered = R.roster.filter(ro => passRosterGeoClass(ro) && ro[rk.TargetFlag] !== '1');
+      if (scope === 'Students') return new Set(filtered.map(ro => ro[rk.StudentID])).size;
+      if (scope === 'Schools') return new Set(filtered.map(ro => ro[rk.SchoolID])).size;
+      if (scope === 'Mandals') return new Set(filtered.map(ro => ro[rk.Mandal])).size;
+      return new Set(filtered.map(ro => ro[rk.District])).size;
+    })();
+
+    // Build per-subject bars
+    const results: Array<{ subj: string; segs: { green: number; amber: number; grey: number; blue: number } }> = [];
+    const rosterById = new Map<string, any>();
+    R.roster.forEach(r => { const id = r[rk.StudentID]; if (id) rosterById.set(id, r); });
+
+    function normSubj(s: string) {
+      const t = (s || '').trim().toLowerCase();
+      if (t.startsWith('math')) return 'math';
+      if (t.startsWith('eng')) return 'english';
+      if (t.startsWith('tel')) return 'telugu';
+      return t;
+    }
+
+    subjectsToShow.forEach(subj => {
+      const subjKey = normSubj(subj);
+      // Onboarded sets for this subject (ever)
+      const onboardedTarget = new Set<string>();
+      const onboardedNonTarget = new Set<string>();
+      // Active sets this period for this subject
+      const activeTarget = new Set<string>();
+      const activeNonTarget = new Set<string>();
+
+      R.facts.forEach(fr => {
+        const ro = rosterById.get(fr[fk.StudentID]);
+        if (!passRosterGeoClass(ro)) return;
+        const s = normSubj(fr[fk.Subject] || '');
+        if (s !== subjKey) return;
+        const isTarget = ro[rk.TargetFlag] === '1';
+        if (isTarget) onboardedTarget.add(fr[fk.StudentID]); else onboardedNonTarget.add(fr[fk.StudentID]);
+        if (inWindow(fr[fk.Date])) {
+          if (isTarget) activeTarget.add(fr[fk.StudentID]); else activeNonTarget.add(fr[fk.StudentID]);
+        }
+      });
+
+      function sizeByScope(setOfStudents: Set<string>, nonTarget = false) {
+        if (scope === 'Students') return setOfStudents.size;
+        if (scope === 'Schools') {
+          const ids = new Set<string>();
+          setOfStudents.forEach(sid => { const ro = rosterById.get(sid); if (ro) ids.add(ro[rk.SchoolID]); });
+          return ids.size;
+        }
+        if (scope === 'Mandals') {
+          const ids = new Set<string>();
+          setOfStudents.forEach(sid => { const ro = rosterById.get(sid); if (ro) ids.add(ro[rk.Mandal]); });
+          return ids.size;
+        }
+        const ids = new Set<string>();
+        setOfStudents.forEach(sid => { const ro = rosterById.get(sid); if (ro) ids.add(ro[rk.District]); });
+        return ids.size;
+      }
+
+      const green = sizeByScope(activeTarget);
+      const amber = Math.max(0, sizeByScope(onboardedTarget) - green);
+      const grey = Math.max(0, totalTargetByScope - sizeByScope(onboardedTarget));
+      const blue = (() => {
+        // Non-target onboarded (ever) for this subject
+        const n = sizeByScope(onboardedNonTarget, true);
+        return n || 0;
+      })();
+
+      results.push({ subj, segs: { green, amber, grey, blue } });
+    });
+
+    return { list: results, targetTotal: totalTargetByScope };
+  }, [state, scope, subjectsToShow]);
+
+  return (
+    <div className="panel">
+      <div className="hstack" style={{ marginBottom: 12 }}>
+        <div className="toggle">
+          {(['Districts', 'Mandals', 'Schools', 'Students'] as const).map((s) => (
+            <button key={s} className={state.coverageScope === s ? 'on' : ''} onClick={() => dispatch({ type: 'setCoverageScope', scope: s })}>
+              {s}
+            </button>
+          ))}
+        </div>
+        <div className="toggle" style={{ marginLeft: 8 }}>
+          {(['Absolute', 'Percent'] as const).map((m) => (
+            <button key={m} className={state.coverageMode === m ? 'on' : ''} onClick={() => dispatch({ type: 'setCoverageMode', mode: m })}>
+              {m}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Header row with Target (once) and Legend */}
+      <div className="hstack" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
+        <div style={{ fontSize: 12 }}>
+          Target: {formatNumber(perSubject?.targetTotal ?? (() => { const d = state.coverage[scope] as any; return (Number(d.green)||0)+(Number(d.amber)||0)+(Number(d.grey)||0); })())}
+        </div>
+        <div className="hstack" style={{ gap: 12, color: 'var(--muted)', fontSize: 12 }}>
+          <LegendItem color="var(--green)" label="Target Onboarded + Active" />
+          <LegendItem color="var(--amber)" label="Target Onboarded, Not Active" />
+          <LegendItem color="#2c3a4d" label="Target Not Onboarded" />
+          <LegendItem color="var(--blue)" label="Non-target (Active + Inactive)" />
+        </div>
+      </div>
+
+      {perSubject ? (
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: `repeat(${subjectsToShow.length}, minmax(0, 1fr))` }}>
+          {subjectsToShow.map((subj) => {
+            const found = perSubject.list.find(p => p.subj === subj);
+            const segs = found?.segs || { green: 0, amber: 0, grey: 0, blue: 0 };
+            const total = (segs.green || 0) + (segs.amber || 0) + (segs.grey || 0) + (segs.blue || 0);
+            return (
+              <div key={subj} className="panel" style={{ padding: 10, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div style={{ color: 'var(--muted)', fontSize: 12, marginBottom: 6 }}>{subj}</div>
+                <Donut
+                  size={120}
+                  thickness={14}
+                  total={total}
+                  segments={[
+                    { key: 'green', label: 'Target Onboarded + Active', value: segs.green, color: 'var(--green)' },
+                    { key: 'amber', label: 'Target Onboarded, Not Active', value: segs.amber, color: 'var(--amber)' },
+                    { key: 'grey', label: 'Target Not Onboarded', value: segs.grey, color: '#2c3a4d' },
+                    { key: 'blue', label: 'Non-target (Active + Inactive)', value: segs.blue, color: 'var(--blue)' },
+                  ]}
+                  onSegmentClick={(label) => dispatch({ type: 'setScope', scope: label.includes('Non-target') ? 'Non-Target' : 'Target' })}
+                  centerLabel={modePercent && total > 0 ? '100%' : formatNumber(total)}
+                  modePercent={modePercent}
+                />
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        // Fallback: single aggregate bar
+        (() => {
+          const data = state.coverage[scope] as any;
+          const total = (Number(data.green) || 0) + (Number(data.amber) || 0) + (Number(data.blue) || 0) + (Number(data.grey) || 0);
+          const targetTotal = (Number(data.green) || 0) + (Number(data.amber) || 0) + (Number(data.grey) || 0);
+          const rows: Array<{ label: string; value: number; color: string }>[] = [[
+            { label: 'Target Onboarded + Active', value: data.green, color: 'var(--green)' },
+            { label: 'Target Onboarded, Not Active', value: data.amber, color: 'var(--amber)' },
+            { label: 'Target Not Onboarded', value: data.grey, color: '#2c3a4d' },
+            { label: 'Non-target (Active + Inactive)', value: data.blue, color: 'var(--blue)' },
+          ]];
+          return (
+            <div className="bar-row">
+              <div style={{ color: 'var(--muted)', fontSize: 12 }}>{scope}</div>
+              <div className="bar">
+                {rows[0].map((seg) => (
+                  <div key={seg.label} title={`${seg.label}: ${seg.value}`} style={{ display: 'inline-block', height: '100%', width: `${total > 0 ? (seg.value / total) * 100 : 0}%`, background: seg.color, cursor: 'pointer' }} onClick={() => dispatch({ type: 'setScope', scope: seg.label.includes('Non-target') ? 'Non-Target' : 'Target' })} />
+                ))}
+              </div>
+            </div>
+          );
+        })()
+      )}
+      {!perSubject && (() => {
+        const data = state.coverage[scope] as any;
+        const total = (Number(data.green) || 0) + (Number(data.amber) || 0) + (Number(data.blue) || 0) + (Number(data.grey) || 0);
+        const rows = [
+          { label: 'Target Onboarded + Active', value: data.green, color: 'var(--green)' },
+          { label: 'Target Onboarded, Not Active', value: data.amber, color: 'var(--amber)' },
+          { label: 'Target Not Onboarded', value: data.grey, color: '#2c3a4d' },
+          { label: 'Non-target (Active + Inactive)', value: data.blue, color: 'var(--blue)' },
+        ];
+        return (
+          <div className="hstack" style={{ marginTop: 8, color: 'var(--muted)', fontSize: 12 }}>
+            {rows.map((seg) => (
+              <div key={seg.label} className="hstack" style={{ gap: 6, marginRight: 12 }}>
+                <span style={{ width: 10, height: 10, background: seg.color, display: 'inline-block', borderRadius: 2 }} />
+                {seg.label}: {modePercent ? (total > 0 ? Math.round((seg.value / total) * 100) + '%' : '0%') : formatNumber(seg.value)}
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+function formatNumber(n: number) {
+  if (n >= 1000) return Math.round(n / 1000) + 'K';
+  return String(n);
+}
+
+function LegendItem({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="hstack" style={{ gap: 6 }}>
+      <span style={{ width: 10, height: 10, background: color, display: 'inline-block', borderRadius: 2 }} />
+      {label}
+    </span>
+  );
+}
+
+function Donut({ size, thickness, total, segments, onSegmentClick, centerLabel, modePercent }:
+  { size: number; thickness: number; total: number; segments: Array<{ key: string; label: string; value: number; color: string }>; onSegmentClick?: (label: string) => void; centerLabel?: string; modePercent?: boolean }) {
+  const r = (size - thickness) / 2;
+  const cx = size / 2; const cy = size / 2;
+  const circumference = 2 * Math.PI * r;
+  const t = Math.max(0, total);
+  let acc = 0;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#0b1320" strokeWidth={thickness} />
+      {segments.map((s) => {
+        const frac = t > 0 ? s.value / t : 0;
+        const len = frac * circumference;
+        const dasharray = `${len} ${circumference - len}`;
+        const el = (
+          <circle
+            key={s.key}
+            cx={cx}
+            cy={cy}
+            r={r}
+            fill="none"
+            stroke={s.color}
+            strokeWidth={thickness}
+            strokeDasharray={dasharray}
+            strokeDashoffset={-acc}
+            style={{ cursor: 'pointer' }}
+            onClick={() => onSegmentClick && onSegmentClick(s.label)}
+          />
+        );
+        acc += len;
+        return el;
+      })}
+      {centerLabel && (
+        <text x={cx} y={cy + 4} fill="var(--text)" fontSize="14" fontWeight={700} textAnchor="middle">{centerLabel}</text>
+      )}
+    </svg>
+  );
+}
+
+function formatLegendValue(prefix: string, value: number, total: number, percent: boolean) {
+  const val = percent ? (total > 0 ? Math.round((value / total) * 100) + '%' : '0%') : formatNumber(value);
+  return `${prefix}: ${val}`;
+}
+
